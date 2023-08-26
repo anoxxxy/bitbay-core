@@ -103,4 +103,91 @@ Value faucet(const Array& params, bool fHelp)
     
     return result;
 }
+/*send BitBay Reserve (for now)*/
+Value faucetx(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 2)
+        throw runtime_error(
+            "faucet <address> <amount>\n"
+            "<amount> is an int (satoshi)"
+            );
+    
+    CBitcoinAddress address(params[0].get_str());
+    if (!address.IsValid())
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid BitBay address");
 
+    // Amount
+    //int64_t nAmount = AmountFromValue(params[1]);
+    //int64_t nAmount2 = AmountFromValue(params[1])*10000000;
+    
+
+    Object result;
+    bool completed_liquid = false;
+    bool completed_reserve = false;
+    string status = "";
+    
+    std::string xAmountStr = params[1].get_str(); // Get the string value
+    int64_t amount = std::stoll(xAmountStr); // Convert string to int64_t    
+    //int64_t amount = 100000000000;
+    CFractions fr(amount, CFractions::VALUE);
+    fr = fr.Std();
+
+    int nSupply = pindexBest ? pindexBest->nPegSupplyIndex : 0;
+    //int64_t liquid = fr.High(nSupply);
+    int64_t liquid = 0;
+    int64_t reserve = fr.Low(nSupply);
+
+    CWalletTx wtx;
+    
+    if (liquid >0) {
+        PegTxType txType = PEG_MAKETX_SEND_LIQUIDITY;
+        
+        vector<pair<CScript, int64_t> > vecSend;
+        CScript scriptPubKey;
+        scriptPubKey.SetDestination(address.Get());
+        vecSend.push_back(make_pair(scriptPubKey, liquid));
+        
+        CReserveKey keyChange(pwalletMain);
+        int64_t nFeeRequired = 0;
+        string sFailCause;
+        bool fCreated = pwalletMain->CreateTransaction(txType, vecSend, wtx, keyChange, nFeeRequired, nullptr, false /*fTest*/, sFailCause);
+        if (fCreated) {
+            
+            bool fCommitted = pwalletMain->CommitTransaction(wtx, keyChange);
+            if (fCommitted) {
+                completed_liquid = true;
+            }
+            
+        }
+    }
+    
+    if (reserve >0) {
+        PegTxType txType = PEG_MAKETX_SEND_RESERVE;
+        
+        vector<pair<CScript, int64_t> > vecSend;
+        CScript scriptPubKey;
+        scriptPubKey.SetDestination(address.Get());
+        vecSend.push_back(make_pair(scriptPubKey, reserve));
+        
+        CReserveKey keyChange(pwalletMain);
+        int64_t nFeeRequired = 0;
+        string sFailCause;
+        bool fCreated = pwalletMain->CreateTransaction(txType, vecSend, wtx, keyChange, nFeeRequired, nullptr, false /*fTest*/, sFailCause);
+        if (fCreated) {
+            
+            bool fCommitted = pwalletMain->CommitTransaction(wtx, keyChange);
+            if (fCommitted) {
+                completed_reserve = true;
+            }
+            
+        }
+    }
+    bool isTransactionSent = completed_reserve;
+
+
+    if (isTransactionSent == false)
+      throw JSONRPCError(RPC_WALLET_ERROR, "Faucet Transaction Failed!");
+    
+    
+    return wtx.GetHash().GetHex();
+}
